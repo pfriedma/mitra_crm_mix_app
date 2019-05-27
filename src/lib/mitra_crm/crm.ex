@@ -118,6 +118,10 @@ defmodule MitraCrm.Crm do
         GenServer.call(pid, {:add_engagement, {stakeholder, engagement}})
     end
 
+
+    def upadte_stakeholder(pid, new_data) do
+        GenServer.call(pid, {:update_stakeholder, new_data})
+    end
     @doc """
     Asks the Crm processes at `pid` for its stored engagement types. 
 
@@ -185,10 +189,13 @@ defmodule MitraCrm.Crm do
     adds an engagement to the stakeholder
     """
     def handle_call({:new_engagement, {engagement_name, type_name, due_date}}, _from, state) do
-        type = Enum.find(state.engagement_types, fn x -> x.engagement_type == type_name end)
-        date = Date.from_iso8601!(due_date)
-        engagement = Engagement.new(self(), engagement_name, type, date)
-        {:reply, engagement, state}
+        with type <- Enum.find(state.engagement_types, fn x -> x.engagement_type == type_name end),
+        {:ok, date} <- Date.from_iso8601(due_date) do
+            engagement = Engagement.new(self(), engagement_name, type, date)
+            {:reply, engagement, state}    
+        else
+            err -> {:reply, {:error, err}, state}
+        end
     end
 
     def handle_call(:get_engagement_types, _from, state) do
@@ -263,10 +270,12 @@ defmodule MitraCrm.Crm do
     end
 
     def handle_call({:add_engagement, {stakeholder, engagement}}, _from, state) do
-        with {:ok, new_stakeholder} <- Stakeholder.add_engagement_to_timeline(stakeholder, engagement) do
-            index = Enum.find_index(state.stakeholders, fn x -> x == stakeholder end)
-            state = upadte_stakeholder_state(state, List.replace_at(state.stakeholders, index, new_stakeholder))
-            {:reply, state.stakeholders, state}
+        with {:ok, new_stakeholder} <- Stakeholder.add_engagement_to_timeline(stakeholder, engagement),
+            index <- Enum.find_index(state.stakeholders, fn x -> x == stakeholder end),
+            new_stakeholders <- List.replace_at(state.stakeholders, index, new_stakeholder)
+            do 
+                new_state = upadte_stakeholder_state(state, new_stakeholders) 
+                {:reply, {:ok, new_stakeholders}, new_state}
         else
             err -> {:reply, {:error, err}, state}
         end
