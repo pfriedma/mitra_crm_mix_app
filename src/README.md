@@ -1,6 +1,10 @@
 # MitraCrm
 
 A lightweight CRM application
+
+## Documentation
+
+[ExDoc Pages](https://pfriedma.github.io/mitra_crm_mix_app/Mitra_CRM_Mix_App/api-reference.html)
 ## Installation
 
 ## Examples
