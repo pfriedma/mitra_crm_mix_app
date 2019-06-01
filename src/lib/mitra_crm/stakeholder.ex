@@ -196,9 +196,9 @@ defmodule MitraCrm.Stakeholder do
 
     """
     def get_all_stakeholder_dates(stakeholders) when is_list(stakeholders) do
-        engagements = Enum.map(stakeholders, fn x -> enagements = {{x.meta.uuid, x.name}, Engagement.get_upcoming_engagements!(x.timeline)} end )
+        engagements = Enum.map(stakeholders, fn x -> enagements = %{uid: x.meta.uuid, name: x.name, engagments: Engagement.get_upcoming_engagements!(x.timeline)} end )
             |> Enum.filter(fn {x,l} -> length(l) > 0 end)
-        dates = Enum.map(stakeholders, fn x -> {{x.meta.uuid, x.name}, get_upcoming_dates!(x)} end )
+        dates = Enum.map(stakeholders, fn x -> %{uid: x.meta.uuid, name: x.name, dates: get_upcoming_dates!(x)} end )
             |> Enum.filter(fn {x,l} -> length(l) > 0 end)
         %{engagements: engagements, important_dates: dates}
     end
