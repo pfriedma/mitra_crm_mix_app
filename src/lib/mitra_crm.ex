@@ -166,11 +166,25 @@ defmodule MitraCrm do
         """
       ) do
         case String.to_integer(String.trim(IO.gets("Action:"))) do
+          1 -> do_add_engagement(pid, stakeholder)
           5 -> pretty_print_stakeholder_details(stakeholder)
           6 -> delete_stakeholder(pid, stakeholder)
           _ -> ""
         end
       end
+  end
+
+  def do_add_engagement(pid, stakeholder) do
+    strip_val = &(if String.length(String.trim(&1)) > 0, do: String.trim(&1), else: nil)
+    with engagement_name <- strip_val.(IO.gets("Engagement Name:")),
+      engagement_type <- strip_val.(IO.gets("Engagement Type:")),
+      due_date <- strip_val.(IO.gets("Due Date:")) do
+        MitraCrm.Crm.add_new_engagement(pid, stakeholder, engagement_name, engagement_type, due_date)
+        MitraCrm.save(pid)
+      else 
+        err -> err  
+      end
+      
   end
 
   def delete_stakeholder(pid, stakeholder) do
