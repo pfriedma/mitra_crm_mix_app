@@ -76,7 +76,7 @@ defmodule MitraCrm do
   end
 
   defp pretty_print_stakeholders(stakeholders) do
-    Enum.map(stakeholders, fn x -> pretty_print_stakeholders(x) end)
+    Enum.map(stakeholders, fn x -> pretty_print_stakeholder(x) end)
     |> Enum.sort
     |> Enum.reduce("", fn x, acc -> x <> acc end )
   end
