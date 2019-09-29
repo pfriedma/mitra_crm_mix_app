@@ -27,7 +27,8 @@ defmodule MitraCrm.MixProject do
       {:poison, "~> 3.1"},
       {:elixir_uuid, "~> 1.2" },
       {:ex_doc, "~> 0.19", only: :dev, runtime: false},
-
+      {:redix, ">= 0.0.0"},
+      {:castore, ">= 0.0.0"}
     ]
   end
 end

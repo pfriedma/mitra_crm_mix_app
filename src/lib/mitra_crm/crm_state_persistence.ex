@@ -1,11 +1,11 @@
-defmodule MitraCrm.CrmStatePersistance do
+defmodule MitraCrm.CrmStatepersistence do
   @moduledoc """
-  This is a persistance server for CRM processes, 
+  This is a persistence server for CRM processes, 
   handles saving and retreiving a CRM processes state
 
   """
   use GenServer
-  alias MitraCrm.{Stakeholder, StakeholderPersistance, Engagement, EngagementType, Crm}
+  alias MitraCrm.{Stakeholder, Stakeholderpersistence, Engagement, EngagementType, Crm}
   @derive [Poison.Encoder, Poison.Decoder]
 
   def start_link() do
@@ -20,11 +20,16 @@ defmodule MitraCrm.CrmStatePersistance do
     {:ok, %{}}
   end
 
-  def init([filename, crm_id]) do
-    {:ok, %{persistance_filename: filename, crm_id: crm_id}}
+  def init([:redis, redis_server, crm_id]) do
+    {:ok, conn} = Redix.start_link(redis_server, name: :redix)
+    {:ok, %{persistence_redisclient: conn, crm_id: crm_id}}
+  end
+
+  def init([:file, filename, crm_id]) do
+    {:ok, %{persistence_filename: filename, crm_id: crm_id}}
   end
   @doc """
-  Tells the Persistance process specified by `pid` to load an individual persistance file (JSON encoded) from `filename`
+  Tells the persistence process specified by `pid` to load an individual persistence file (JSON encoded) from `filename`
 
   Returns `{:ok, state}`.
 
@@ -38,7 +43,7 @@ defmodule MitraCrm.CrmStatePersistance do
   end
 
   @doc """
-  Tells the Persistance process specified by `pid` to load the persistance  file (JSON encoded) from `filename`
+  Tells the persistence process specified by `pid` to load the persistence  file (JSON encoded) from `filename`
   and returns the state whoose %{user: %{id: }} map has the value specified by `id`.
 
   Returns `{:ok, state}`. if state found
@@ -50,7 +55,7 @@ defmodule MitraCrm.CrmStatePersistance do
   end
 
   @doc """
-  Tells the Persistance process specified by `pid` to write out state `data` to `filename` as JSON.
+  Tells the persistence process specified by `pid` to write out state `data` to `filename` as JSON.
   Appends to file. 
 
   Returns `{:ok}
@@ -75,9 +80,17 @@ defmodule MitraCrm.CrmStatePersistance do
     end
   end
 
+  def handle_call({:load_redis, redis_server, id}, _from, state) do
+    with {:ok, crm_state} <- load_state_from_redis(redis_server, id) do
+      {:reply, {:ok, crm_state}, state}
+    else
+      err -> {:reply, err, state}
+    end
+  end
+
   def handle_call(:load_using_state, _from, state) do
-      with {:ok, {filename, id}} <- get_persistance_params(state),
-      {:ok, crm_state} <- load_state_from_file(filename, id) do
+      with {:ok, {kind, filename, id}} <- get_persistence_params(state),
+      {:ok, crm_state} <- load_state(kind, filename, id) do
         {:reply, {:ok, crm_state}, state}
       else
         err -> {:reply, err, state}
@@ -85,15 +98,15 @@ defmodule MitraCrm.CrmStatePersistance do
 
   end
 
-  def handle_call({:update_persistance_params, {filename, crm_id, :file}}, _from, state) do
+  def handle_call({:update_persistence_params, {filename, crm_id, :file}}, _from, state) do
     newstate = state
     |> Map.put(:filename, filename)
     |> Map.put(:crm_id, crm_id)
     {:reply, :ok, newstate}
   end
 
-  def handle_call(:get_persistance_params, _from, state) do
-    {:reply, get_persistance_params(state), state}
+  def handle_call(:get_persistence_params, _from, state) do
+    {:reply, get_persistence_params(state), state}
   end
 
   @doc """
@@ -111,8 +124,8 @@ defmodule MitraCrm.CrmStatePersistance do
   end
 
   def handle_call({:write_proc, data}, _from, state) do
-    with {:ok, {filename, id}} <- get_persistance_params(state),
-    :ok <- write_state_to_file(filename, data) do
+    with {:ok, {kind, filename, id}} <- get_persistence_params(state),
+    :ok <- write_state(kind, filename, data) do
       {:reply, {:ok}, state}
     else
       err -> {:reply, {:error, err}, state}
@@ -146,13 +159,33 @@ defmodule MitraCrm.CrmStatePersistance do
     end
   end
 
+
+  @doc """
+  Loads in the persistence from redis with the specified proc id
+
+  Returns {:ok, state}.
+  """ 
+  def load_state_from_redis(redis_server, id) do
+    with  {:ok, state_json} <- Redix.command(redis_server, ["GET", id]),
+      {:ok, state} <- Crm.from_json(state_json)   
+    do
+      {:ok, state}
+    else
+      err -> err 
+    end
+  end
+
+
+
+
+
+
   @doc """
   Loads in the `filename` and filters the lines to where %{user: %{id: x}} = id
   Does not currently de-duplicate.
 
   Returns {:ok, state}.
   """ 
-
   def load_state_from_file(filename, id) do
     with stream <- File.stream!(filename, [:read], :line),
          ops <- Stream.map(stream, fn x -> Crm.from_json!(x) end),
@@ -202,12 +235,52 @@ defmodule MitraCrm.CrmStatePersistance do
     replace_in_file(filename, state)
   end
 
-  defp get_persistance_params(state) do 
-    with {:ok, filename} <- Map.fetch(state, :persistance_filename),
-      {:ok, crm_id} <- Map.fetch(state, :crm_id) do
-        {:ok, {filename, crm_id}}
-      else
-        err -> {:error, {:persistance_not_found, err}}
-      end
+  def write_state_to_redis(redis_server, state) do
+    with {:ok, state_user} <- Map.fetch(state, :user),
+    {:ok, id} <- Map.fetch(state_user, :id), 
+    {:ok, json} <- Crm.to_json(state),
+    {:ok, "OK"} <- Redix.command(redis_server, ["SET", id, json]) do
+      :ok
+    else
+      err -> err 
+    end
   end
+
+  defp get_persistence_params(state) do 
+    cond do
+      Map.has_key?(state, :persistence_filename) ->
+        with {:ok, crm_id} <- Map.fetch(state, :crm_id), 
+        {:ok, filename} <- Map.fetch(state, :persistence_filename) do
+          {:ok, {:file, filename, crm_id}}
+        else
+          err -> {:error, {:persistence_not_found, err}}
+        end
+      Map.has_key?(state, :persistence_redisclient) ->
+        with {:ok, crm_id} <- Map.fetch(state, :crm_id), 
+        {:ok, redis_server} <- Map.fetch(state, :persistence_redisclient) do
+          {:ok, {:redis, redis_server, crm_id}}
+        else
+          err -> {:error, {:persistence_not_found, err}}
+        end
+      true -> 
+        {:error, {:persistence_not_found, nil}}
+    end
+  end
+
+
+
+  defp load_state(:redis, redis_server, id) do
+    load_state_from_redis(redis_server, id)
+  end
+  defp load_state(:file, filename, id) do
+    load_state_from_file(filename, id)
+  end
+
+  defp write_state(:file, filename, id) do
+    write_state_to_file(filename, id) 
+  end
+  defp write_state(:redis, redis_server, id) do
+    write_state_to_redis(redis_server, id)
+  end
+
 end

@@ -1,6 +1,6 @@
-defmodule MitraCrm.StakeholderPersistance do
+defmodule MitraCrm.Stakeholderpersistence do
 
-    alias MitraCrm.{StakeholderPersistance,Stakeholder}
+    alias MitraCrm.{Stakeholderpersistence,Stakeholder}
 
     def load_stakeholders_from_file!(filename) do
         {:ok, stakeholders} = load_stakeholders_from_file(filename)

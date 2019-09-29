@@ -14,7 +14,7 @@ A lightweight CRM application
 iex(2)> alias MitraCrm.Crm
 MitraCrm.Crm
 iex(3)> {:ok, pid} = Crm.start_link
-iex(3)> {:ok, pid} = Crm.start_link(42, "/tmp/persistance.json", :file)
+iex(3)> {:ok, pid} = Crm.start_link(42, "/tmp/persistence.json", :file)
 ```
 
 ### Add Stakeholder
@@ -28,8 +28,8 @@ iex(4)> Crm.add_stakeholder(pid, [given_name: "John", family_name: "Smith"])
     dates: [],
     meta: %MitraCrm.StakeholderMetadata{
       crm_uids: [nil],
-      persistance_type: :json,
-      persistance_uri: "",
+      persistence_type: :json,
+      persistence_uri: "",
       shared: false,
       updated_date: #DateTime<2019-05-27 20:15:58.761394Z>,
       uuid: "urn:uuid:3d9f812e-80bc-11e9-a21d-b8f6b118cc7d"
@@ -116,12 +116,12 @@ MitraCrm.Stakeholder.update_attributes(test_stakeholder, "Favorite Food", ["pizz
    ...
 ```
 
-### Persistance with :file
+### persistence with :file
 ```
 
 iex(1)> alias MitraCrm.Crm                                                                            
 MitraCrm.Crm
-iex(2)> {:ok, pid} = Crm.start_link(42, "/tmp/persistance.json", :file)                  
+iex(2)> {:ok, pid} = Crm.start_link(42, "/tmp/persistence.json", :file)                  
 {:ok, #PID<0.471.0>}
 
 iex(3)> Crm.load_state_proc(pid)

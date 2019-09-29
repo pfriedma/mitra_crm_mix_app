@@ -96,7 +96,10 @@ defmodule MitraCrm.Engagement do
         end
     end
 
-    def get_upcoming_engagements(engagements, threshold) do
+    def get_upcoming_engagements([], threshold) do 
+        {:ok, []}
+    end
+    def get_upcoming_engagements(engagements, threshold) do 
         {:ok, Enum.filter(engagements, fn x -> upcoming_engagement?(x,threshold) end )}
     end
 

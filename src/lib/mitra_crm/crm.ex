@@ -5,9 +5,9 @@ defmodule MitraCrm.Crm do
     """
 
     use GenServer
-    alias MitraCrm.{StakeholderName, StakeholderMetadata,Stakeholder,StakeholderPersistance,Engagement,EngagementType,Crm,StakeholderConcern,StakeholderDate,StakeholderRelationship,StakeholderRelationshipValue}
-    @derive [{Poison.Encoder, except: [:persistance_pid]}, Poison.Decoder]
-    defstruct [user: %{id: 0}, stakeholders: [%Stakeholder{}], engagement_types: [%EngagementType{}], persistance_pid: nil ]
+    alias MitraCrm.{StakeholderName, StakeholderMetadata,Stakeholder,Stakeholderpersistence,Engagement,EngagementType,Crm,StakeholderConcern,StakeholderDate,StakeholderRelationship,StakeholderRelationshipValue}
+    @derive [{Poison.Encoder, except: [:persistence_pid]}, Poison.Decoder]
+    defstruct [user: %{id: 0}, stakeholders: [%Stakeholder{}], engagement_types: [%EngagementType{}], persistence_pid: nil ]
 
     
     @doc """
@@ -19,8 +19,12 @@ defmodule MitraCrm.Crm do
         GenServer.start_link(__MODULE__, [id, []], [])
     end
 
+    def start_link(id, redis_server, :redis) do
+        GenServer.start_link(__MODULE__, [id, [:redis, redis_server, id]], [])
+    end
+
     def start_link(id, filename, :file) do
-        GenServer.start_link(__MODULE__, [id, [filename, id]], [])
+        GenServer.start_link(__MODULE__, [id, [:file, filename, id]], [])
     end
 
     def init([id, opts]) when is_list(opts) do
@@ -28,8 +32,8 @@ defmodule MitraCrm.Crm do
         user = %{id: id}
         stakeholders = []
         {:ok, engagement_types} = EngagementType.get_default_engaement_types
-        {:ok, persistance_pid} = MitraCrm.CrmStatePersistance.start_link(opts)
-        {:ok, %{user: user, stakeholders: stakeholders, engagement_types: engagement_types, persistance_pid: persistance_pid}}
+        {:ok, persistence_pid} = MitraCrm.CrmStatepersistence.start_link(opts)
+        {:ok, %{user: user, stakeholders: stakeholders, engagement_types: engagement_types, persistence_pid: persistence_pid}}
    
     end
  
@@ -122,6 +126,15 @@ defmodule MitraCrm.Crm do
     def upadte_stakeholder(pid, new_data) do
         GenServer.call(pid, {:update_stakeholder, new_data})
     end
+
+    def add_stakeholder_date(pid, stakeholder, date, desc, reminder_int, annual) do
+        with {:ok, new_data} <- Stakeholder.new_date(stakeholder, date, desc, reminder_int, annual) do
+            GenServer.call(pid, {:update_stakeholder, new_data})
+        else
+            err -> err  
+        end
+    end
+
     @doc """
     Asks the Crm processes at `pid` for its stored engagement types. 
 
@@ -220,7 +233,7 @@ defmodule MitraCrm.Crm do
     end
 
     def handle_call({:load_from_file, filename}, _from, state) do
-        with {:ok, stakeholders} <- StakeholderPersistance.load_stakeholders_from_file(filename) do
+        with {:ok, stakeholders} <- Stakeholderpersistence.load_stakeholders_from_file(filename) do
             state = upadte_stakeholder_state(state, stakeholders)
             {:reply, state, state}
         else
@@ -282,7 +295,7 @@ defmodule MitraCrm.Crm do
     end
 
     def handle_call({:load_state_file, filename}, _from, state) do
-        with {:ok, new_state} <- MitraCrm.CrmStatePersistance.load(state.persistance_pid, filename, state.user.id) 
+        with {:ok, new_state} <- MitraCrm.CrmStatepersistence.load(state.persistence_pid, filename, state.user.id) 
         do
             updated_state = state
             |> Map.put(:stakeholders, new_state.stakeholders)
@@ -295,7 +308,7 @@ defmodule MitraCrm.Crm do
     end
 
     def handle_call(:load_state_proc, _from, state) do 
-        with {:ok, new_state} <- MitraCrm.CrmStatePersistance.load(state.persistance_pid) 
+        with {:ok, new_state} <- MitraCrm.CrmStatepersistence.load(state.persistence_pid) 
         do
             updated_state = state
             |> Map.put(:stakeholders, new_state.stakeholders)
@@ -307,7 +320,7 @@ defmodule MitraCrm.Crm do
         end
     end
     def handle_call({:persist_state, filename}, _from, state) do
-        with {:ok} <- MitraCrm.CrmStatePersistance.write(state.persistance_pid, filename, state) do
+        with {:ok} <- MitraCrm.CrmStatepersistence.write(state.persistence_pid, filename, state) do
             {:reply, :ok, state}
         else
             err -> {:reply, {:error, err}, state}
@@ -316,7 +329,7 @@ defmodule MitraCrm.Crm do
     end
 
     def handle_call(:persist_state_proc, _from, state) do
-        with {:ok} <- MitraCrm.CrmStatePersistance.write(state.persistance_pid,state) do
+        with {:ok} <- MitraCrm.CrmStatepersistence.write(state.persistence_pid,state) do
             {:reply, :ok, state}
         else
             err -> {:reply, {:error, err}, state}
@@ -325,7 +338,7 @@ defmodule MitraCrm.Crm do
     end
 
     def handle_cast({:load_from_file, filename}, state) do
-        with {:ok, stakeholders} <- StakeholderPersistance.load_stakeholders_from_file(filename) do
+        with {:ok, stakeholders} <- Stakeholderpersistence.load_stakeholders_from_file(filename) do
             state = upadte_stakeholder_state(state, stakeholders)
             {:noreply, state}
         end
@@ -333,7 +346,7 @@ defmodule MitraCrm.Crm do
     end
 
     def handle_cast({:persist_state, filename}, state) do
-        with {:ok} <- MitraCrm.CrmStatePersistance.write(state.persistance_pid, filename, state) do
+        with {:ok} <- MitraCrm.CrmStatepersistence.write(state.persistence_pid, filename, state) do
             {:noreply, state}
         end
     end
@@ -341,12 +354,12 @@ defmodule MitraCrm.Crm do
     def handle_info({:EXIT, dead_pid, _reason}, state) do
   
         # Start new process based on dead_pid spec
-        {:ok, persistance_pid} = MitraCrm.CrmStatePersistance.start_link
+        {:ok, persistence_pid} = MitraCrm.CrmStatepersistence.start_link
         
         # Remove the dead_pid and insert the new_pid with its spec
         new_state = state
-        |> Map.delete(:persistance_pid)
-        |> Map.put(:persistance_pid, persistance_pid)
+        |> Map.delete(:persistence_pid)
+        |> Map.put(:persistence_pid, persistence_pid)
         
         {:noreply, new_state}
 
@@ -370,7 +383,7 @@ defmodule MitraCrm.Crm do
     end
 
     def to_json(state) do
-        Map.delete(state, :persistance_pid)
+        Map.delete(state, :persistence_pid)
         |>Poison.encode
     end
 
