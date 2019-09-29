@@ -1,7 +1,7 @@
 defmodule MitraCrm.Engagement do
     alias MitraCrm.{Stakeholder,Engagement,EngagementType,StakeholderRelationship, StakeholderRelationshipCosts}
     @derive [Poison.Encoder]
-    defstruct [:due_date, :name, :notes, :engagement_type, :action_items, :state, :result]
+    defstruct [:uuid, :due_date, :name, :notes, :engagement_type, :action_items, :state, :result]
 
     @eng_states [:open, :in_progress, :complete, :deferred, :canceled] 
     @eng_results [:success, :failure]
@@ -10,6 +10,7 @@ defmodule MitraCrm.Engagement do
 
     defimpl Poison.Decoder, for: Engagement do
         def decode(%{
+            uuid: uuid, 
             due_date: due_date, 
             name: name,
             notes: notes,
@@ -18,7 +19,9 @@ defmodule MitraCrm.Engagement do
             result: result,
             engagement_type: %{"description" => ed, "engagement_type" => et}
         }, options) do
+            uid = if is_nil(uuid), do: UUID.uuid1(:urn), else: uuid
             %Engagement{ 
+                uuid: uid,
                 due_date: Date.from_iso8601!(due_date),
                 name: name, 
                 notes: notes,
@@ -41,7 +44,7 @@ defmodule MitraCrm.Engagement do
 
     def new(pid,name,engagement_type,due_date) do
         case valid_engagement_type?(engagement_type,pid) do
-            true -> {:ok, %Engagement{due_date: due_date, name: name, notes: " ", engagement_type: engagement_type, action_items: [], state: :open, result: nil}}
+            true -> {:ok, %Engagement{uuid: UUID.uuid1(:urn), due_date: due_date, name: name, notes: " ", engagement_type: engagement_type, action_items: [], state: :open, result: nil}}
             false -> {:error, :invalid_engagement_type}
             _ -> {:error, :engagement_type_retreival_error}
         end

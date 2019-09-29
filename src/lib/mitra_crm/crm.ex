@@ -123,7 +123,7 @@ defmodule MitraCrm.Crm do
     end
 
 
-    def upadte_stakeholder(pid, new_data) do
+    def update_stakeholder(pid, new_data) do
         GenServer.call(pid, {:update_stakeholder, new_data})
     end
 
@@ -165,6 +165,34 @@ defmodule MitraCrm.Crm do
         GenServer.call(pid, {:put_engagement_type, t})
     end
 
+    def update_stakeholder_relationship(pid,stakeholder_uuid,relationship, value, focused) do
+        with {:ok, stakeholder} <- get_stakeholder_by_uuid(pid, stakeholder_uuid) do
+            {:ok, u_stk} = Stakeholder.update_relationship_metric(stakeholder, relationship, value, focused)
+            GenServer.call(pid, {:update_stakeholder, u_stk})
+        else
+            err -> err  
+        end
+    end
+
+    def update_stakeholder_attributes(pid, stakeholder_uuid, attribute, value) do
+        with {:ok, stakeholder} <- get_stakeholder_by_uuid(pid, stakeholder_uuid) do
+            {:ok, u_stk} = Stakeholder.update_attributes(stakeholder, attribute, value)
+            GenServer.call(pid, {:update_stakeholder, u_stk})
+        else
+            err -> err  
+        end    
+    end
+
+    def add_stakeholder_concern(pid, stakeholder_uuid, name, description, importance) do
+        with {:ok, stakeholder} <- get_stakeholder_by_uuid(pid, stakeholder_uuid), 
+            {:ok, concern} = StakeholderConcern.new(name, description, importance) do
+                {:ok, updated_stakeholder} = Stakeholder.update_concerns(stakeholder, concern)
+                GenServer.call(pid, {:update_stakeholder, updated_stakeholder})
+            else
+                err -> err  
+            end
+    end
+
     @doc """
     Gets `[%Stakeholder{}]`s who have not been contacted in `past_threshold` days or will be contacted within `future_threshold` days.
 
@@ -194,6 +222,10 @@ defmodule MitraCrm.Crm do
         GenServer.call(pid, {:defer_engagement, stakeholder, engagement})
     end
 
+    def delete_stakeholder(pid, stakeholder) do
+        GenServer.call(pid, {:del_stakeholder, stakeholder})
+    end
+
     def get_stakeholder_by_uuid(pid, uuid) do
         GenServer.call(pid, {:get_stakeholder, uuid, :uuid})
     end
@@ -214,6 +246,7 @@ defmodule MitraCrm.Crm do
     def handle_call(:get_engagement_types, _from, state) do
         {:reply, state.engagement_types, state}
     end
+    
 
     def handle_call({:put_engagement_type, type}, _from, state) do
         new_enagement_types = [type | state.engagement_types]
@@ -234,7 +267,7 @@ defmodule MitraCrm.Crm do
 
     def handle_call({:load_from_file, filename}, _from, state) do
         with {:ok, stakeholders} <- Stakeholderpersistence.load_stakeholders_from_file(filename) do
-            state = upadte_stakeholder_state(state, stakeholders)
+            state = update_stakeholder_state(state, stakeholders)
             {:reply, state, state}
         else
             err -> {:reply, {:error, err}, state}
@@ -246,10 +279,21 @@ defmodule MitraCrm.Crm do
         {:reply, state.stakeholders, state}
     end
 
+    def handle_call({:del_stakeholder, stakeholder}, _from, state) do
+        with stakeholders <- state.stakeholders, 
+            new_stakeholders <- Enum.reject(stakeholders, fn x -> x == stakeholder end),
+            state = update_stakeholder_state(state, new_stakeholders) 
+        do
+            {:reply, state.stakeholders, state}
+        else
+            err -> {:reply, {:error, err}, state}
+        end
+    end
+
     def handle_call({:add_stakeholder, stakeholder_name_opts}, _from, state) do
         with {:ok, stakeholder} <- Stakeholder.new(stakeholder_name_opts),
             stakeholders <- state.stakeholders do
-            state = upadte_stakeholder_state(state, [stakeholder | stakeholders])
+            state = update_stakeholder_state(state, [stakeholder | stakeholders])
             {:reply, state.stakeholders, state}
         else
             err -> {:reply, {:error, err}, state}
@@ -258,7 +302,7 @@ defmodule MitraCrm.Crm do
 
     def handle_call({:add_stakeholder_raw, stakeholder}, _from, state) do
             with stakeholders <- state.stakeholders do
-            state = upadte_stakeholder_state(state, [stakeholder | stakeholders])
+            state = update_stakeholder_state(state, [stakeholder | stakeholders])
             {:reply, state.stakeholders, state}
         else
             err -> {:reply, {:error, err}, state}
@@ -275,7 +319,7 @@ defmodule MitraCrm.Crm do
 
     def handle_call({:update_stakeholder, new_data}, _from, state)  do
         with {:ok, stakeholders} <- Stakeholder.replace_stakeholder(state.stakeholders, new_data) do
-            new_state = upadte_stakeholder_state(state, stakeholders)
+            new_state = update_stakeholder_state(state, stakeholders)
             {:reply, new_state.stakeholders, new_state}
         else
             err -> {:reply, {:error, err}, state}
@@ -287,7 +331,7 @@ defmodule MitraCrm.Crm do
             index <- Enum.find_index(state.stakeholders, fn x -> x == stakeholder end),
             new_stakeholders <- List.replace_at(state.stakeholders, index, new_stakeholder)
             do 
-                new_state = upadte_stakeholder_state(state, new_stakeholders) 
+                new_state = update_stakeholder_state(state, new_stakeholders) 
                 {:reply, {:ok, new_stakeholders}, new_state}
         else
             err -> {:reply, {:error, err}, state}
@@ -339,7 +383,7 @@ defmodule MitraCrm.Crm do
 
     def handle_cast({:load_from_file, filename}, state) do
         with {:ok, stakeholders} <- Stakeholderpersistence.load_stakeholders_from_file(filename) do
-            state = upadte_stakeholder_state(state, stakeholders)
+            state = update_stakeholder_state(state, stakeholders)
             {:noreply, state}
         end
 
@@ -367,7 +411,7 @@ defmodule MitraCrm.Crm do
 
     defp write_impl()
 
-    defp upadte_stakeholder_state(state, stakeholders) do
+    defp update_stakeholder_state(state, stakeholders) do
         Map.put(state, :stakeholders, stakeholders)
     end
 

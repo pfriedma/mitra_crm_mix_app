@@ -84,7 +84,8 @@ defmodule MitraCrm.Stakeholder do
 
     """
     def update_attributes(stakeholder, attribute, value) do
-        attributes = Map.put(stakeholder.attributes, attribute, value)
+        attrib_map = if is_nil(stakeholder.attributes), do: %{}, else: stakeholder.attributes
+        attributes = Map.put(attrib_map, attribute, value)
         updated_stakeholder = %Stakeholder{ stakeholder | attributes: attributes }
         |> update_meta_date
         {:ok, updated_stakeholder}
@@ -97,7 +98,8 @@ defmodule MitraCrm.Stakeholder do
 
     """
     def update_contact(stakeholder, contact_title, value) do 
-        contacts = Map.put(stakeholder.contact_information, contact_title, value)
+        c_map = if is_nil(stakeholder.contact_information), do: %{}, else: stakeholder.contact_information
+        contacts = Map.put(c_map, contact_title, value)
         updated_stakeholder = %Stakeholder{ stakeholder | contact_information: contacts}
         |> update_meta_date
         {:ok, updated_stakeholder}
@@ -155,7 +157,7 @@ defmodule MitraCrm.Stakeholder do
     """
     def update_relationship_metric(stakeholder, dimension, value, focus) do
         relationship = stakeholder.relationship
-        rel = StakeholderRelationship.update_relationship(relationship, dimension, value, focus)
+        {:ok, rel} = StakeholderRelationship.update_relationship(relationship, dimension, value, focus)
         update_relationship(stakeholder, rel)
     end
 

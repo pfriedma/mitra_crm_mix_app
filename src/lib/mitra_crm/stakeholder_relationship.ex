@@ -18,7 +18,7 @@ defmodule MitraCrm.StakeholderRelationship do
     def update_relationship(relationship, dimension, value, focus) do
         {:ok, rel} = StakeholderRelationshipValue.new(value, focus)
         relationships = Map.put(relationship, dimension, rel)
-        {:ok, relationship}
+        {:ok, relationships}
     end
 
 

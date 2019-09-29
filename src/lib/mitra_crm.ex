@@ -43,6 +43,40 @@ defmodule MitraCrm do
 
   def add_stakeholder(pid, stakeholder_opts_or_stakeholder_name) do
     MitraCrm.Crm.add_stakeholder(pid, stakeholder_opts_or_stakeholder_name)
+    MitraCrm.save(pid)
+  end
+
+  def add_engagement(pid, stakeholder, engagement_name, type_name, due_date ) do
+    MitraCrm.Crm.add_new_engagement(pid, stakeholder, engagement_name, type_name, due_date)
+    MitraCrm.save(pid)
+  end
+
+  def list_engagements(pid, stakeholder_uuid) do 
+    with {:ok, stakaholder} <- MitraCrm.Crm.get_stakeholder_by_uuid(pid, stakeholder_uuid) do
+      ""
+    end
+  end
+
+  def select_stakeholder(pid) do
+    with stakeholders <- MitraCrm.Crm.get_stakeholders(pid) do
+      Stream.with_index(stakeholders, 1) |> Enum.reduce(%{}, fn({v,k}, acc)-> Map.put(acc, k, %{uuid: v.meta.uuid, gn: v.name.given_name, sn: v.name.family_name}) end)
+      
+    end
+  end
+
+
+  def list_stakeholders(pid) do
+    with stakeholders <- MitraCrm.Crm.get_stakeholders(pid) do
+      IO.puts(
+        """
+
+        Stakeholder   -- UID
+        ----------------------------------------- 
+        """
+      )
+      IO.puts(Enum.reduce(stakeholders, "", fn(x,acc) -> 
+        "#{x.name.given_name} #{x.name.family_name} -- #{x.meta.uuid}\n" <> acc end ))
+    end
   end
 
   def status(pid) do
@@ -87,6 +121,89 @@ defmodule MitraCrm do
     else 
       err -> err   
     end
+  end
+
+  def pretty_print_stakeholder_details(stakeholder) do
+    IO.puts("\nRelationship:")
+    pretty_print_stakeholder_relationship(stakeholder)
+    IO.puts("\nAttributes:")
+    if is_map(stakeholder.attributes), do: stakeholder.attributes, else: %{}
+    |>  Map.to_list 
+    |> Enum.each(fn {k,v} -> IO.puts("#{k}: #{v}") end)
+
+  end
+
+  def shell(pid) do
+    save(pid)
+    with stakeholders <- select_stakeholder(pid),
+      Enum.each(stakeholders, fn {k, v} -> IO.puts("#{k}: #{v.gn} #{v.sn}") end),
+      sel <- IO.gets("Select (0 to add new): "),
+      true <- String.length(String.trim(sel)) > 0,
+      index <- String.to_integer(String.strip(sel)),
+      stk <- Map.get(stakeholders, index)
+      do
+        if index == 0, do: perform_add_stakeholder(pid), else: perform_stakeholder_action(pid, stk.uuid)
+      else
+        _ -> IO.puts("invalid slection")
+        save(pid)
+        shell(pid)
+      end
+    
+  end
+
+  def perform_stakeholder_action(pid, uuid) do
+      with {:ok, stakeholder} <- MitraCrm.Crm.get_stakeholder_by_uuid(pid, uuid),
+      IO.puts(
+        """
+        #{pretty_print_stakeholder(stakeholder)}
+        Actions: 
+        1: Add Engagement
+        2: Add Date
+        3: Add Concern
+        4: Add Attirbute
+        5: Get Details
+        6: Delete
+        """
+      ) do
+        case String.to_integer(String.trim(IO.gets("Action:"))) do
+          5 -> pretty_print_stakeholder_details(stakeholder)
+          6 -> delete_stakeholder(pid, stakeholder)
+          _ -> ""
+        end
+      end
+  end
+
+  def delete_stakeholder(pid, stakeholder) do
+    MitraCrm.Crm.delete_stakeholder(pid, stakeholder)
+    shell(pid)
+  end
+  
+  def perform_add_stakeholder(pid) do
+    strip_val = &(if String.length(String.trim(&1)) > 0, do: String.trim(&1), else: nil)
+    with given_name <- strip_val.(IO.gets("Given Name: ")),
+      family_name <- strip_val.(IO.gets("Family Name: ")),
+      middle_initial <- strip_val.(IO.gets("Middle Initial:")),
+      prefix <- strip_val.(IO.gets("Prefix:")), 
+      suffix <- strip_val.(IO.gets("Suffix:")) do
+        args = [given_name: given_name, family_name: family_name, middle_initial: middle_initial, prefix: prefix, suffix: suffix]
+        case String.trim(IO.gets("OK? (y/n/a)")) do 
+          "y" -> MitraCrm.add_stakeholder(pid, args)
+          "a" -> shell(pid)
+          _ -> perform_add_stakeholder(pid)
+        end
+    end
+    shell(pid)
+  end
+
+  defp pretty_print_stakeholder_relationship(stakeholder) do
+    with relationship <- Map.get(stakeholder, :relationship),
+      dimensions <- Map.keys(relationship) do
+      Enum.filter(dimensions, fn x -> is_map(Map.get(relationship, x)) end)
+      |> Enum.map(fn x -> 
+        rel = Map.get(relationship, x)
+        "#{x} - at #{rel.metric} #{if not rel.focused, do: "not "}focusing" end)
+      |> Enum.each(fn x -> IO.puts(x) end)
+      end
   end
 
   defp pretty_print_dates(dates) do
