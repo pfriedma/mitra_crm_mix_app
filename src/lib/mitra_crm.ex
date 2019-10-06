@@ -232,8 +232,10 @@ defmodule MitraCrm do
   end
 
   defp do_select_engagement(engagements) do
-    with {:ok, selection} <- do_selection_from_list(
-      engagements, 
+    with filtered_engagments <- Enum.reject(engagements, fn x -> 
+        (x.state == :deferred or x.state == :complete or x.state == :canceled) end),
+      {:ok, selection} <- do_selection_from_list(
+      filtered_engagments, 
       fn x -> x end,
       fn {k,v} -> IO.puts(
         """
