@@ -127,10 +127,15 @@ defmodule MitraCrm do
     IO.puts("\nRelationship:")
     pretty_print_stakeholder_relationship(stakeholder)
     IO.puts("\nAttributes:")
-    if is_map(stakeholder.attributes), do: stakeholder.attributes, else: %{}
-    |>  Map.to_list 
-    |> Enum.each(fn {k,v} -> IO.puts("#{k}: #{v}") end)
-
+    if is_map(stakeholder.attributes) do
+       Map.to_list(stakeholder.attributes)
+       |> Enum.each(fn {k,v} -> IO.puts("#{k}: #{v}") end)
+    else 
+      IO.puts("")
+    end
+    IO.puts("\nConcerns:")
+    IO.inspect(stakeholder.concerns)
+    IO.puts("\n")
   end
 
   def shell(pid) do
@@ -143,6 +148,8 @@ defmodule MitraCrm do
       stk <- Map.get(stakeholders, index)
       do
         if index == 0, do: perform_add_stakeholder(pid), else: perform_stakeholder_action(pid, stk.uuid)
+        save(pid)
+        shell(pid)
       else
         _ -> IO.puts("invalid slection")
         save(pid)
@@ -163,22 +170,212 @@ defmodule MitraCrm do
         4: Add Attirbute
         5: Get Details
         6: Delete
+        7: Mod Engagemeent
+        8: Mod Concern 
+        0: Return
         """
       ) do
         case String.to_integer(String.trim(IO.gets("Action:"))) do
           1 -> do_add_engagement(pid, stakeholder)
+          2 -> do_add_date(pid, stakeholder)
+          3 -> do_add_concern(pid, stakeholder)
+          4 -> do_add_attribute(pid, stakeholder)
           5 -> pretty_print_stakeholder_details(stakeholder)
           6 -> delete_stakeholder(pid, stakeholder)
-          _ -> ""
+          7 -> do_mod_engagement(pid, stakeholder)
+          8 -> do_mod_concern(pid, stakeholder)
+          0 -> true
+          _ -> perform_stakeholder_action(pid, uuid)
         end
       end
   end
 
+  def do_mod_engagement(pid, stakeholder) do 
+    with {:ok, selected_engagement} <- do_select_engagement(stakeholder.timeline) do
+      case String.to_integer(prompt(
+        """
+        #{selected_engagement.name}
+        0: Abort
+        1: Defer 
+        2: Add Notes
+        3: Update State
+        4: Resolve
+        """
+        )) do
+          0 -> true
+          1 -> delay = String.to_integer(prompt("Defer by how many days?:"))
+              MitraCrm.Crm.defer_engagement(pid, stakeholder, selected_engagement, delay)
+          2 -> note = prompt("Add Note:")
+              new_engagement = Map.replace!(selected_engagement, :notes, selected_engagement.notes <> "\n" <> note)
+              updated_engagements = MitraCrm.Engagement.update_engagements(stakeholder.timeline, selected_engagement, new_engagement)
+              updated_stakeholder = Map.replace!(stakeholder, :timeline, updated_engagements)
+              MitraCrm.Crm.update_stakeholder(pid, updated_stakeholder)
+          3 -> status = String.to_existing_atom(String.downcase(prompt(
+                """
+                Select new status (open, in_progress, complete, canceled): 
+                """
+                )))
+              new_engagement = Map.replace!(selected_engagement, :state, status) 
+              updated_engagements = MitraCrm.Engagement.update_engagements(stakeholder.timeline, selected_engagement, new_engagement)
+              updated_stakeholder = Map.replace!(stakeholder, :timeline, updated_engagements)
+              MitraCrm.Crm.update_stakeholder(pid, updated_stakeholder)
+          4 -> result = String.to_existing_atom(String.downcase(prompt("Success or Failure?:")))
+              new_engagement = 
+                Map.replace!(selected_engagement, :result, result) 
+                |> Map.replace!(:state, :complete)
+              updated_engagements = MitraCrm.Engagement.update_engagements(stakeholder.timeline, selected_engagement, new_engagement)
+              updated_stakeholder = Map.replace!(stakeholder, :timeline, updated_engagements)
+              MitraCrm.Crm.update_stakeholder(pid, updated_stakeholder)
+          _ -> true
+        end 
+    end
+  end
+
+  defp do_select_engagement(engagements) do
+    with {:ok, selection} <- do_selection_from_list(
+      engagements, 
+      fn x -> x end,
+      fn {k,v} -> IO.puts(
+        """
+        #{k}:
+        Name: #{v.name}
+        Due Date: #{Date.to_iso8601(v.due_date)}
+        Notes: #{v.notes}
+        Result: #{v.result}
+        State: #{v.state}
+        Type: #{v.engagement_type.engagement_type}
+        """) end ) do
+          {:ok, selection}
+        else 
+          _ -> :error 
+        end
+  end
+
+  def do_mod_concern(pid, stakeholder) do
+    with concerns <- stakeholder.concerns,
+       selected_concern <- do_select_concern(concerns),
+       false <- is_nil(selected_concern), 
+        updated_concern <- do_mod_concern_menu(selected_concern), 
+        new_concerns <- insert_and_update(concerns, selected_concern, updated_concern),
+          updated_stakeholder <- Map.replace!(stakeholder, :concerns, new_concerns) do
+          MitraCrm.Crm.update_stakeholder(pid, updated_stakeholder)
+        
+          else 
+            err -> err  
+          end
+  end
+
+  defp do_mod_concern_menu(concern) do
+    with sel <- String.to_integer(prompt(
+      """
+      Updating #{concern.name}
+      0 To Abort
+      1: Resolve Concern
+      2: Update Importance
+      9: Delete Concern
+      """
+    )) do
+      case sel do
+        1 -> if confirm("Resolved (y/n)? ") do
+          Map.replace!(concern, :resolved, true)
+        end
+        2 -> new_importence = String.to_integer(prompt("New Importance (0-9):"))
+             if 0 < new_importence > 9 do
+               Map.replace!(concern, :importance, new_importence)
+             else 
+              IO.puts("invalid")
+              concern
+             end
+        9 -> nil
+        _ -> concern
+        true -> concern
+      end
+    end
+    
+  end
+
+  defp insert_and_update(list, item, new_data) do
+    if new_data == nil do
+      Enum.reject(list, fn x -> x == item end)
+    else
+      index = Enum.find_index(list, fn x -> x == item end)
+      List.replace_at(list, index, new_data)
+    end
+  end
+
+  defp do_select_concern(concerns) do
+    with {:ok, selection} <- do_selection_from_list(
+      concerns, 
+      fn x -> x end,
+      fn {k,v} -> IO.puts(
+        """
+        #{k}:
+        Name: #{v.name}
+        Description: #{v.description}
+        Importance: #{v.importance}
+        Resolved: #{v.resolved}
+        Date Added: #{Date.to_iso8601(v.date_added)}
+        """) end
+      ) do
+          selection
+    else 
+          _ -> nil 
+    end
+    
+  end 
+  defp do_selection_from_list(list, map_fn, disp_fn) do
+    sel_map = select_from_list(list, map_fn)
+    sel_map
+    |> Enum.each(disp_fn)
+    sel = String.to_integer(prompt("Selection (0 to abort):"))
+    if sel > 0 do
+      Map.fetch(sel_map, sel)
+    else 
+      nil
+    end
+  end
+  defp select_from_list(list, attribute_map) do
+    Stream.with_index(list, 1) |> Enum.reduce(%{}, fn({v,k}, acc)-> Map.put(acc, k, attribute_map.(v)) end)
+
+  end
+
+  def do_mod_engagement(pid, stakeholder) do
+    
+  end
+  def do_add_date(pid, stakeholder) do
+    with date <- prompt("Date (ISO):"),
+      description <- prompt("Description:"),
+      reminder <- String.to_integer(prompt("Reminder (days):")),
+      annual <- String.to_existing_atom(prompt("Annual date (true/false):")) do
+        MitraCrm.Crm.add_stakeholder_date(pid, stakeholder, date, description, reminder, annual)
+      else  
+        err -> err  
+      end 
+  end
+
+  def do_add_concern(pid, stakeholder) do
+    with name <- prompt("Name of Concern:"),
+      desc <- prompt("Concern Description:"),
+      importance <- String.to_integer(prompt("Concern Importance (0-9):")) do
+        MitraCrm.Crm.add_stakeholder_concern(pid, stakeholder.meta.uuid, name, desc, importance)
+      else
+        err -> err  
+      end
+  end
+
+  def do_add_attribute(pid, stakeholder) do
+    with attribute <- prompt("Attribute Name:"), 
+      value <- prompt("Attribute Value:") do
+        IO.puts("Creating:\n#{attribute}:#{value}\n")
+        confirm(MitraCrm.Crm.update_stakeholder_attributes(pid, stakeholder.meta.uuid, attribute, value))
+      else
+        err -> err  
+      end
+  end
   def do_add_engagement(pid, stakeholder) do
-    strip_val = &(if String.length(String.trim(&1)) > 0, do: String.trim(&1), else: nil)
-    with engagement_name <- strip_val.(IO.gets("Engagement Name:")),
-      engagement_type <- strip_val.(IO.gets("Engagement Type:")),
-      due_date <- strip_val.(IO.gets("Due Date:")) do
+    with engagement_name <- strip_val(IO.gets("Engagement Name:")),
+      engagement_type <- strip_val(IO.gets("Engagement Type:")),
+      due_date <- strip_val(IO.gets("Due Date:")) do
         MitraCrm.Crm.add_new_engagement(pid, stakeholder, engagement_name, engagement_type, due_date)
         MitraCrm.save(pid)
       else 
@@ -193,12 +390,11 @@ defmodule MitraCrm do
   end
   
   def perform_add_stakeholder(pid) do
-    strip_val = &(if String.length(String.trim(&1)) > 0, do: String.trim(&1), else: nil)
-    with given_name <- strip_val.(IO.gets("Given Name: ")),
-      family_name <- strip_val.(IO.gets("Family Name: ")),
-      middle_initial <- strip_val.(IO.gets("Middle Initial:")),
-      prefix <- strip_val.(IO.gets("Prefix:")), 
-      suffix <- strip_val.(IO.gets("Suffix:")) do
+    with given_name <- strip_val(IO.gets("Given Name: ")),
+      family_name <- strip_val(IO.gets("Family Name: ")),
+      middle_initial <- strip_val(IO.gets("Middle Initial:")),
+      prefix <- strip_val(IO.gets("Prefix:")), 
+      suffix <- strip_val(IO.gets("Suffix:")) do
         args = [given_name: given_name, family_name: family_name, middle_initial: middle_initial, prefix: prefix, suffix: suffix]
         case String.trim(IO.gets("OK? (y/n/a)")) do 
           "y" -> MitraCrm.add_stakeholder(pid, args)
@@ -258,6 +454,25 @@ defmodule MitraCrm do
             err -> err  
           end
       true -> "error"
+    end
+  end
+
+  defp strip_val(x) do
+    if String.length(String.trim(x)) > 0, do: String.trim(x), else: nil
+  end
+
+  defp prompt(string) do
+    with val <- IO.gets(string) do
+      strip_val(val)
+    else 
+      err -> err  
+    end
+  end
+
+  defp confirm(fun) do
+    case prompt("Proceed? (y/n)") do
+      "y" -> fun 
+      _ -> IO.puts("Aborting")
     end
   end
 

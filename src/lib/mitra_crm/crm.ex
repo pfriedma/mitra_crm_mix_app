@@ -212,14 +212,14 @@ defmodule MitraCrm.Crm do
     end
 
     @doc """
-    Defers the `engagement` of `stakeholder` by `deferrment`. 
+    Defers the `engagement` of `stakeholder` by `delay`. 
     Creates a new engement with the same information as the original but with the date pushed out.
     Marks the original engagement's state to deferred. 
 
     returns `{:ok, [%Stakeholders{}]}.
     """
-    def defer_engagement(pid, stakeholder, engagement) do
-        GenServer.call(pid, {:defer_engagement, stakeholder, engagement})
+    def defer_engagement(pid, stakeholder, engagement, delay) do
+        GenServer.call(pid, {:defer_engagement, stakeholder, engagement, delay})
     end
 
     def delete_stakeholder(pid, stakeholder) do
@@ -247,6 +247,17 @@ defmodule MitraCrm.Crm do
         {:reply, state.engagement_types, state}
     end
     
+    def handle_call({:defer_engagement, stakeholder, engagement, delay }, _from, state) do
+        with {:ok, new_timeline} <- MitraCrm.Engagement.defer_and_update_engagements(stakeholder.timeline, engagement, delay),
+            new_data <- Map.put(stakeholder, :timeline, new_timeline),
+            {:ok, stakeholders} <- Stakeholder.replace_stakeholder(state.stakeholders, new_data) do
+            new_state = update_stakeholder_state(state, stakeholders)
+            {:reply, new_state.stakeholders, new_state}
+        else
+            err -> {:reply, {:error, err}, state}
+        end
+        
+    end
 
     def handle_call({:put_engagement_type, type}, _from, state) do
         new_enagement_types = [type | state.engagement_types]
