@@ -9,7 +9,7 @@ defmodule MitraCrm.Application do
     # List all child processes to be supervised
     children = [
       # Starts a worker by calling: MitraCrm.Worker.start_link(arg)
-      # {MitraCrm.Worker, arg}
+      # {{MitraCrm.Worker, arg}}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
@@ -17,4 +17,9 @@ defmodule MitraCrm.Application do
     opts = [strategy: :one_for_one, name: MitraCrm.Supervisor]
     Supervisor.start_link(children, opts)
   end
+
+  def start_crm(args) do
+    MitraCrm.Supervisor.start_link(args)
+  end
+
 end

@@ -1,5 +1,5 @@
 defmodule MitraCrm do
-
+  
   alias MitraCrm
   @moduledoc """
   Documentation for MitraCrm.
@@ -14,24 +14,22 @@ defmodule MitraCrm do
       :world
 
   """
-
   
-  def start(name, persistence_uri, persistence_type) do
-    opts = %{persistence_uri: persistence_uri, persistence_type: persistence_type}
-    start(name, opts)
+  def start([name,id]) do
+    {:ok, app} = MitraCrm.Application.start_crm([name, id])
+    kernel_loop(id)
   end
 
-  def start(name, opts) when is_map(opts) do
-    with {:ok, persistence_uri} <- Map.get(opts, :persistence_uri),
-    {:ok, persistence_type} <- Map.get(opts, :persistence_type), 
-    {:ok, pid} <- MitraCrm.Crm.start_link(name, persistence_uri, persistence_type) do
-      pid
-    else 
-      err -> err
-    end
+  def kernel_loop(id) do
+    pid = get_pid(id)
+    load(pid)
+    shell(pid)
+    kernel_loop(id)
   end
 
-
+  def get_pid(id) do
+    :global.whereis_name("MitraCrm.#{id}")
+  end
 
   def load(pid) do
     MitraCrm.Crm.load_state_proc(pid)
@@ -139,22 +137,41 @@ defmodule MitraCrm do
   end
 
   def shell(pid) do
-    save(pid)
+    IO.puts("Mitra")
+    with opts <- [{"Status Dashboard", fn x-> status(x) end},
+            {"Manage Stakeholders", fn x-> stk_shell(x) end},
+          {"Exit", true}],
+    {:ok, {d,f}} <- do_selection_from_list(opts, 
+      fn x -> x end, fn {k,{l,v}} -> IO.puts("#{k}: #{l}") end) do
+        if f == true, do: true, else: f.(pid)
+      else 
+        err -> err  
+      end
+  end
+
+  def stk_shell(pid) do
     with stakeholders <- select_stakeholder(pid),
       Enum.each(stakeholders, fn {k, v} -> IO.puts("#{k}: #{v.gn} #{v.sn}") end),
-      sel <- IO.gets("Select (0 to add new): "),
-      true <- String.length(String.trim(sel)) > 0,
-      index <- String.to_integer(String.strip(sel)),
-      stk <- Map.get(stakeholders, index)
-      do
-        if index == 0, do: perform_add_stakeholder(pid), else: perform_stakeholder_action(pid, stk.uuid)
-        save(pid)
-        shell(pid)
-      else
-        _ -> IO.puts("invalid slection")
-        save(pid)
-        shell(pid)
-      end
+      sel <- String.trim(IO.gets("Select (0 to add new, x to abort):")) do
+        if sel == "x" do
+          true
+        else
+          with true <- String.length(String.trim(sel)) > 0,
+            index <- String.to_integer(String.strip(sel)),
+            stk <- Map.get(stakeholders, index)
+            do
+              if index == 0, do: perform_add_stakeholder(pid), else: perform_stakeholder_action(pid, stk.uuid)
+              save(pid)
+              stk_shell(pid)
+            else
+              _ -> IO.puts("invalid slection")
+              save(pid)
+              stk_shell(pid)
+            end
+          end
+        else 
+          err -> err 
+        end
     
   end
 
@@ -191,7 +208,9 @@ defmodule MitraCrm do
   end
 
   def do_mod_engagement(pid, stakeholder) do 
-    with {:ok, selected_engagement} <- do_select_engagement(stakeholder.timeline) do
+    with {:ok, selected_engagement} <- do_select_engagement(stakeholder.timeline),
+    states <- [:open, :in_progress, :complete, :deferred, :canceled],
+    results <- [:success, :failure]   do
       case String.to_integer(prompt(
         """
         #{selected_engagement.name}
@@ -206,26 +225,12 @@ defmodule MitraCrm do
           1 -> delay = String.to_integer(prompt("Defer by how many days?:"))
               MitraCrm.Crm.defer_engagement(pid, stakeholder, selected_engagement, delay)
           2 -> note = prompt("Add Note:")
-              new_engagement = Map.replace!(selected_engagement, :notes, selected_engagement.notes <> "\n" <> note)
-              updated_engagements = MitraCrm.Engagement.update_engagements(stakeholder.timeline, selected_engagement, new_engagement)
-              updated_stakeholder = Map.replace!(stakeholder, :timeline, updated_engagements)
-              MitraCrm.Crm.update_stakeholder(pid, updated_stakeholder)
-          3 -> status = String.to_existing_atom(String.downcase(prompt(
-                """
-                Select new status (open, in_progress, complete, canceled): 
-                """
-                )))
-              new_engagement = Map.replace!(selected_engagement, :state, status) 
-              updated_engagements = MitraCrm.Engagement.update_engagements(stakeholder.timeline, selected_engagement, new_engagement)
-              updated_stakeholder = Map.replace!(stakeholder, :timeline, updated_engagements)
-              MitraCrm.Crm.update_stakeholder(pid, updated_stakeholder)
-          4 -> result = String.to_existing_atom(String.downcase(prompt("Success or Failure?:")))
-              new_engagement = 
-                Map.replace!(selected_engagement, :result, result) 
-                |> Map.replace!(:state, :complete)
-              updated_engagements = MitraCrm.Engagement.update_engagements(stakeholder.timeline, selected_engagement, new_engagement)
-              updated_stakeholder = Map.replace!(stakeholder, :timeline, updated_engagements)
-              MitraCrm.Crm.update_stakeholder(pid, updated_stakeholder)
+              MitraCrm.Crm.add_note_to_engagement(pid, stakeholder, selected_engagement, note)
+          3 ->{:ok, state} = do_selection_from_list(states, &(&1), fn {k,v} -> IO.puts("#{k}: #{v}") end) 
+                MitraCrm.Crm.set_engagement_state(pid, stakeholder, selected_engagement, state)
+              
+          4 -> {:ok, result} = do_selection_from_list(results, &(&1), fn {k,v} -> IO.puts("#{k}: #{v}") end)
+              MitraCrm.Crm.complete_engagement_w_status(pid, stakeholder, selected_engagement, result)
           _ -> true
         end 
     end
@@ -257,11 +262,8 @@ defmodule MitraCrm do
     with concerns <- stakeholder.concerns,
        selected_concern <- do_select_concern(concerns),
        false <- is_nil(selected_concern), 
-        updated_concern <- do_mod_concern_menu(selected_concern), 
-        new_concerns <- insert_and_update(concerns, selected_concern, updated_concern),
-          updated_stakeholder <- Map.replace!(stakeholder, :concerns, new_concerns) do
-          MitraCrm.Crm.update_stakeholder(pid, updated_stakeholder)
-        
+        updated_concern <- do_mod_concern_menu(selected_concern) do
+          MitraCrm.Crm.mod_stakeholder_concern(pid, stakeholder, selected_concern, updated_concern)
           else 
             err -> err  
           end
@@ -282,7 +284,7 @@ defmodule MitraCrm do
           Map.replace!(concern, :resolved, true)
         end
         2 -> new_importence = String.to_integer(prompt("New Importance (0-9):"))
-             if 0 < new_importence > 9 do
+             if 0 < new_importence and new_importence> 9 do
                Map.replace!(concern, :importance, new_importence)
              else 
               IO.puts("invalid")
@@ -296,14 +298,6 @@ defmodule MitraCrm do
     
   end
 
-  defp insert_and_update(list, item, new_data) do
-    if new_data == nil do
-      Enum.reject(list, fn x -> x == item end)
-    else
-      index = Enum.find_index(list, fn x -> x == item end)
-      List.replace_at(list, index, new_data)
-    end
-  end
 
   defp do_select_concern(concerns) do
     with {:ok, selection} <- do_selection_from_list(
@@ -336,14 +330,14 @@ defmodule MitraCrm do
       nil
     end
   end
+
+
+
   defp select_from_list(list, attribute_map) do
     Stream.with_index(list, 1) |> Enum.reduce(%{}, fn({v,k}, acc)-> Map.put(acc, k, attribute_map.(v)) end)
 
   end
 
-  def do_mod_engagement(pid, stakeholder) do
-    
-  end
   def do_add_date(pid, stakeholder) do
     with date <- prompt("Date (ISO):"),
       description <- prompt("Description:"),
