@@ -140,6 +140,7 @@ defmodule MitraCrm do
     IO.puts("Mitra")
     with opts <- [{"Status Dashboard", fn x-> status(x) end},
             {"Manage Stakeholders", fn x-> stk_shell(x) end},
+            {"Dump Stakeholder DB", fn x -> IO.inspect(MitraCrm.Crm.get_stakeholders(x)) end },
           {"Exit", true}],
     {:ok, {d,f}} <- do_selection_from_list(opts, 
       fn x -> x end, fn {k,{l,v}} -> IO.puts("#{k}: #{l}") end) do
@@ -189,6 +190,7 @@ defmodule MitraCrm do
         6: Delete
         7: Mod Engagemeent
         8: Mod Concern 
+        9: Mod Relationship
         0: Return
         """
       ) do
@@ -201,11 +203,26 @@ defmodule MitraCrm do
           6 -> delete_stakeholder(pid, stakeholder)
           7 -> do_mod_engagement(pid, stakeholder)
           8 -> do_mod_concern(pid, stakeholder)
+          9 -> do_mod_relationship(pid, stakeholder)
           0 -> true
           _ -> perform_stakeholder_action(pid, uuid)
         end
       end
   end
+
+
+  def do_mod_relationship(pid, stakeholder) do
+    pretty_print_stakeholder_relationship(stakeholder)
+    with rels <- [:credability, :empathy, :reliability, :stakeholderfocus],
+    {:ok, key} <- do_selection_from_list(rels, &(&1), fn {k,v} -> IO.puts("#{k}: #{v}") end),
+    value <- String.to_integer(prompt("New Value (0-9):")),
+    focusing <- String.to_existing_atom(prompt("Focusing (true/fale):")) do
+      MitraCrm.Crm.update_stakeholder_relationship(pid, stakeholder.meta.uuid, key, value, focusing)
+    else
+      err -> err  
+    end
+  end
+
 
   def do_mod_engagement(pid, stakeholder) do 
     with {:ok, selected_engagement} <- do_select_engagement(stakeholder.timeline),

@@ -126,10 +126,11 @@ defmodule MitraCrm.Engagement do
     end
 
     defp upcoming_engagement?(engagement, threshold) do
-        with reminder_date <- Date.add(Date.utc_today, threshold) 
+        with reminder_date <- Date.add(Date.utc_today, threshold),
+        state <- engagement.state 
         do 
             difference = Date.diff(reminder_date, engagement.due_date)
-            difference <= threshold and difference > 0
+            difference <= threshold and difference > 0 and not (state == :canceled or state == :complete or state == :deferred)
         end
     end
     
